@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Medya İndirici & Önizleyici | Ahmet Gün</title>
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="apple-touch-icon" href="favicon.svg">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="background-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <main class="container">
+    <!-- Header -->
+    <header class="app-header">
+      <!-- App Brand Logo Icon -->
+      <div class="app-logo">
+        <img src="favicon.svg" alt="Medya İndirici Logo" class="logo-img">
+      </div>
+
+      <div class="badge">
+        <i class="fa-solid fa-bolt"></i> %100 Mobil & Hızlı İndirici
+      </div>
+      <h1>Medya İndirici & Önizleyici</h1>
+      <p>YouTube, video veya görsel bağlantısını yapıştırın; anında önizleyin ve cihazınıza indirin.</p>
+    </header>
+
+    <!-- Main Card / Input Section -->
+    <section class="card input-card">
+      <form id="media-form" class="input-form">
+        <div class="input-wrapper">
+          <i class="fa-solid fa-link input-icon"></i>
+          <input 
+            type="url" 
+            id="url-input" 
+            placeholder="Link yapıştırın (YouTube, Görsel, MP4...)" 
+            required
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+          >
+          <button type="button" id="paste-btn" class="icon-btn" title="Panodan Yapıştır">
+            <i class="fa-regular fa-paste"></i>
+          </button>
+          <button type="button" id="clear-btn" class="icon-btn" title="Temizle" style="display: none;">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <button type="submit" id="load-btn" class="btn btn-primary">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <span>Medyayı Getir</span>
+        </button>
+      </form>
+
+      <!-- Quick Test Samples -->
+      <div class="sample-links">
+        <span class="sample-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Örnekler:</span>
+        <button type="button" class="sample-chip" data-url="https://youtu.be/iVjCBaj81Vw?si=qfpi2tWWSsvfdqTq">
+          <i class="fa-brands fa-youtube" style="color: #ef4444;"></i> YouTube
+        </button>
+        <button type="button" class="sample-chip" data-url="https://images.unsplash.com/photo-1579546929518-9e396f3cc809?auto=format&fit=crop&w=1200&q=80">
+          <i class="fa-regular fa-image" style="color: #60a5fa;"></i> Görsel
+        </button>
+        <button type="button" class="sample-chip" data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4">
+          <i class="fa-solid fa-video" style="color: #a78bfa;"></i> MP4 Video
+        </button>
+      </div>
+    </section>
+
+    <!-- Loading State -->
+    <div id="loader" class="loader-container" style="display: none;">
+      <div class="spinner"></div>
+      <p id="loader-text">Medya taranıyor ve analiz ediliyor...</p>
+    </div>
+
+    <!-- Alert / Message Banner -->
+    <div id="alert-box" class="alert-box" style="display: none;">
+      <i class="alert-icon fa-solid fa-circle-exclamation"></i>
+      <div class="alert-content">
+        <h4 id="alert-title">Bilgi</h4>
+        <p id="alert-message">Mesaj detayı</p>
+      </div>
+      <button type="button" id="alert-close" class="alert-close-btn">&times;</button>
+    </div>
+
+    <!-- Preview & Download Section -->
+    <section id="preview-section" class="card preview-card" style="display: none;">
+      <div class="preview-header">
+        <div class="media-badge" id="media-type-badge">
+          <i class="fa-solid fa-photo-film"></i> <span id="media-type-text">Medya</span>
+        </div>
+        <div class="media-details" id="media-details-text">
+          <!-- Resolution, duration, uploader -->
+        </div>
+      </div>
+
+      <!-- Media Display Area -->
+      <div class="media-container" id="media-container">
+        <!-- Dynamic: img or video element -->
+      </div>
+
+      <!-- Video Info Title / Description -->
+      <div id="media-info-box" class="media-info-box" style="display: none;">
+        <h3 id="media-title-text">Başlık</h3>
+        <p id="media-uploader-text" class="media-uploader"></p>
+      </div>
+
+      <!-- Download Controls -->
+      <div class="download-controls">
+        <!-- Quality Selector for YouTube / Social -->
+        <div class="quality-wrapper" id="quality-wrapper" style="display: none;">
+          <label for="quality-select"><i class="fa-solid fa-sliders"></i> Çözünürlük / Format Seçin:</label>
+          <select id="quality-select" class="custom-select">
+            <!-- Filled dynamically -->
+          </select>
+        </div>
+
+        <!-- Custom Filename (for direct media) -->
+        <div class="filename-wrapper" id="filename-wrapper">
+          <label for="filename-input"><i class="fa-solid fa-pen"></i> Dosya Adı:</label>
+          <div class="filename-input-group">
+            <input type="text" id="filename-input" placeholder="dosya_adi">
+            <span class="file-extension" id="file-extension-badge">.mp4</span>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+          <button type="button" id="download-btn" class="btn btn-success btn-lg">
+            <i class="fa-solid fa-cloud-arrow-down"></i>
+            <span id="download-btn-text">Cihaza İndir</span>
+          </button>
+          <a id="direct-open-btn" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+            <span>Yeni Sekmede Aç</span>
+          </a>
+          <button type="button" id="copy-url-btn" class="btn btn-outline">
+            <i class="fa-regular fa-copy"></i>
+            <span>Linki Kopyala</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Info Features Grid -->
+    <section class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
+        <h3>Mobil Uyumlu</h3>
+        <p>Telefon, tablet ve bilgisayarlarda kusursuz çalışan dokunmatik dostu tasarım.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fa-brands fa-youtube"></i></div>
+        <h3>YouTube & Sosyal Medya</h3>
+        <p>YouTube videolarını en yüksek kalitede MP4 video veya MP3 ses olarak kaydedin.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><i class="fa-solid fa-images"></i></div>
+        <h3>Görsel & Video</h3>
+        <p>JPG, PNG, GIF, WebP ve doğrudan video akışlarını anında görüntüleyin ve indirin.</p>
+      </div>
+    </section>
+
+    <!-- Footer with Developer Credit -->
+    <footer class="app-footer">
+      <div class="developer-badge">
+        <i class="fa-solid fa-code"></i>
+        <span><strong>Ahmet Gün</strong> tarafından geliştirilmiştir</span>
+      </div>
+      <p class="footer-subtext">Tüm hakları saklıdır &bull; Medya İndirici & Önizleyici Web Uygulaması</p>
+    </footer>
+  </main>
+
+  <!-- Custom JavaScript -->
+  <script src="app.js"></script>
+</body>
+</html>

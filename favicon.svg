@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.2" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background Rounded Squircle -->
+  <rect x="24" y="24" width="464" height="464" rx="128" fill="url(#bgGrad)" filter="url(#shadow)" />
+  
+  <!-- Subtle Border Highlight -->
+  <rect x="24" y="24" width="464" height="464" rx="128" fill="none" stroke="url(#glowGrad)" stroke-width="6" opacity="0.6" />
+
+  <!-- Center Media Play & Download Symbol -->
+  <!-- Play Polygon Background -->
+  <path d="M190 145 L375 256 L190 367 Z" fill="#ffffff" fill-opacity="0.15" />
+  
+  <!-- Arrow Down Download Stem -->
+  <path d="M256 140 L256 310" stroke="#ffffff" stroke-width="44" stroke-linecap="round" />
+  
+  <!-- Arrow Down Head -->
+  <path d="M176 245 L256 325 L336 245" fill="none" stroke="#ffffff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" />
+  
+  <!-- Bottom Tray / Disk Bar -->
+  <path d="M160 375 L352 375" stroke="#ffffff" stroke-width="44" stroke-linecap="round" />
+</svg>
