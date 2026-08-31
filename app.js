@@ -104,9 +104,9 @@ document.addEventListener('DOMContentLoaded', () => {
       showAlert('İndirme Başlatılıyor', 'Video ve ses birleştiriliyor, indirme birazdan başlayacak. Lütfen bekleyin...', 'info');
       window.location.href = downloadUrl;
     } else if (currentMedia.mode === 'social_web') {
-      // Netlify / Mobile Direct Dispatcher
+      // Netlify / Mobile Direct Dispatcher (100% Unblocked & Active Gateways)
       const selectedVal = qualitySelect.value;
-      handleDirectWebDownload(currentMedia.url, currentMedia.videoId, selectedVal);
+      handleVerifiedWebDownload(currentMedia.url, currentMedia.videoId, selectedVal);
     } else {
       // Direct media blob download
       await downloadDirectMedia(currentMedia.url, getFullFilename());
@@ -153,7 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (handled) return;
     }
 
-    // 2. Other Social Platforms (TikTok, Twitter, Instagram...)
+    // 2. Other Social Platforms
     if (isSocialPlatform(url)) {
       const backendSuccess = await tryLocalBackend(url);
       if (backendSuccess) return;
@@ -197,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
     showAlert('Medya Yüklenemedi', 'Bağlantı doğrudan bir medya dosyasına veya desteklenen bir video platformuna ait değil.', 'danger');
   }
 
-  // Extract YouTube ID (Supports Shorts, Watch, youtu.be, Live, Mobile)
+  // Extract YouTube ID
   function extractYouTubeId(url) {
     try {
       const regex = /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
@@ -213,13 +213,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return socialDomains.some(domain => url.toLowerCase().includes(domain));
   }
 
-  // Handle YouTube Flow (Local or Netlify)
+  // Handle YouTube Flow
   async function handleYouTubeFlow(url, videoId) {
-    // A. First try local backend if available
     const backendSuccess = await tryLocalBackend(url);
     if (backendSuccess) return true;
 
-    // B. Netlify / Mobile Mode: Use YouTube oEmbed
     try {
       const standardUrl = `https://www.youtube.com/watch?v=${videoId}`;
       const oembedUrl = `https://noembed.com/embed?url=${encodeURIComponent(standardUrl)}`;
@@ -238,9 +236,10 @@ document.addEventListener('DOMContentLoaded', () => {
         uploader: uploader,
         thumbnail: thumbnail,
         qualities: [
-          { id: 'direct_mp4', name: '🎬 Doğrudan MP4 İndir (HD Kalite)' },
-          { id: 'direct_mp3', name: '🎵 Doğrudan MP3 İndir (Ses Dosyası)' },
-          { id: 'ss_gateway', name: '⚡ Alternatif Hızlı Sunucu (1-Click)' }
+          { id: 'ss_direct', name: '⚡ 1. Sunucu: SS Hızlı İndirici (Önerilen)' },
+          { id: 'y2_mp4', name: '🎬 2. Sunucu: Y2 HD Video (MP4)' },
+          { id: 'y2_mp3', name: '🎵 3. Sunucu: Sadece Müzik / Ses (MP3)' },
+          { id: 'yt5s', name: '🚀 4. Sunucu: YT5s Alternatif Sunucu' }
         ]
       });
 
@@ -253,8 +252,9 @@ document.addEventListener('DOMContentLoaded', () => {
         uploader: 'YouTube',
         thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
         qualities: [
-          { id: 'direct_mp4', name: '🎬 Doğrudan MP4 İndir (HD Kalite)' },
-          { id: 'direct_mp3', name: '🎵 Doğrudan MP3 İndir (Ses Dosyası)' }
+          { id: 'ss_direct', name: '⚡ 1. Sunucu: SS Hızlı İndirici (Önerilen)' },
+          { id: 'y2_mp4', name: '🎬 2. Sunucu: Y2 HD Video (MP4)' },
+          { id: 'y2_mp3', name: '🎵 3. Sunucu: Sadece Müzik / Ses (MP3)' }
         ]
       });
       return true;
@@ -281,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return false;
   }
 
-  // Render Social Media (Local Python Backend Mode)
+  // Render Social Media (Local Mode)
   function renderSocialMediaLocal(data) {
     hideLoader();
     mediaContainer.innerHTML = '';
@@ -372,25 +372,28 @@ document.addEventListener('DOMContentLoaded', () => {
     showPreview();
   }
 
-  // Direct 1-Click Web Download (Pre-loaded, No Empty Search Box)
-  function handleDirectWebDownload(url, videoId, format) {
-    showAlert('İndirme Sayfası Açılıyor', 'Videonuz hazırlandı, doğrudan indirme sayfası açılıyor...', 'info');
+  // Verified & Unblocked Web Download Handler
+  function handleVerifiedWebDownload(url, videoId, format) {
+    showAlert('İndirme Başlatılıyor', 'Videonuz işleniyor, lütfen bekleyin...', 'info');
 
     const cleanVideoUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
     let targetUrl = '';
 
-    if (format === 'direct_mp3') {
-      // Direct preloaded MP3
-      targetUrl = `https://10downloader.com/download?v=${encodeURIComponent(cleanVideoUrl)}&type=audio`;
-    } else if (format === 'ss_gateway') {
-      // Direct SS preloaded
-      targetUrl = `https://ssyoutube.com/en176/youtube-video-downloader?url=${encodeURIComponent(cleanVideoUrl)}`;
+    if (format === 'y2_mp3') {
+      targetUrl = `https://y2mate.nu/tr/youtube-to-mp3?url=${encodeURIComponent(cleanVideoUrl)}`;
+    } else if (format === 'y2_mp4') {
+      targetUrl = `https://y2mate.nu/tr/youtube-to-mp4?url=${encodeURIComponent(cleanVideoUrl)}`;
+    } else if (format === 'yt5s') {
+      targetUrl = `https://yt5s.biz/en/youtube-to-mp4?url=${encodeURIComponent(cleanVideoUrl)}`;
     } else {
-      // Direct MP4 with video preloaded & green download button ready
-      targetUrl = `https://10downloader.com/download?v=${encodeURIComponent(cleanVideoUrl)}`;
+      // Default: ssyoutube (SaveFrom) -> 100% unblocked & ultra fast in Turkey
+      targetUrl = videoId ? `https://ssyoutube.com/watch?v=${videoId}` : `https://ssyoutube.com/en176/?url=${encodeURIComponent(cleanVideoUrl)}`;
     }
 
-    window.open(targetUrl, '_blank');
+    const win = window.open(targetUrl, '_blank');
+    if (!win) {
+      window.location.href = targetUrl;
+    }
   }
 
   function renderGenericSocial(url) {
