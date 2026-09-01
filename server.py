@@ -2,10 +2,12 @@ import os
 import re
 import tempfile
 import uuid
+import urllib.request
+import json
 import yt_dlp
 import imageio_ffmpeg
 import shutil
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, redirect
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder='.')
@@ -29,10 +31,15 @@ print(f"FFmpeg dizini: {FFMPEG_DIR}")
 # Shared YouTube extractor args to bypass bot detection on cloud datacenters
 YOUTUBE_EXTRACTOR_ARGS = {
     'youtube': {
-        'player_client': ['ios', 'android', 'tv', 'web_creator'],
+        'player_client': ['android', 'ios', 'tv', 'web_creator'],
         'player_skip': ['webpage', 'configs']
     }
 }
+
+def extract_youtube_id(url):
+    regex = r'(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    match = re.search(regex, url)
+    return match.group(1) if match else None
 
 @app.route('/')
 def serve_index():
@@ -128,10 +135,42 @@ def analyze_url():
                 'original_url': url
             })
     except Exception as e:
-        error_msg = str(e)
+        print(f"yt-dlp analyze hatası: {e}. Fallback mekanizması başlatılıyor...")
+        
+        # OEmbed Fallback for YouTube when datacenter IP is blocked
+        yt_id = extract_youtube_id(url)
+        if yt_id:
+            try:
+                oembed_url = f"https://noembed.com/embed?url=https://www.youtube.com/watch?v={yt_id}"
+                req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    oembed_data = json.loads(response.read().decode('utf-8'))
+                    
+                title = oembed_data.get('title', 'YouTube Videosu')
+                uploader = oembed_data.get('author_name', 'YouTube')
+                thumbnail = f"https://i.ytimg.com/vi/{yt_id}/hqdefault.jpg"
+
+                return jsonify({
+                    'success': True,
+                    'type': 'social_video',
+                    'title': title,
+                    'thumbnail': thumbnail,
+                    'duration': 0,
+                    'uploader': uploader,
+                    'description': '',
+                    'qualities': [
+                        {'format_id': 'best_video', 'resolution': '🎬 En Yüksek Kalite Video (MP4)', 'height': 1080, 'ext': 'mp4', 'size': '', 'type': 'video'},
+                        {'format_id': 'audio_mp3', 'resolution': '🎵 Sadece Müzik / Ses (MP3)', 'height': 0, 'ext': 'mp3', 'size': '', 'type': 'audio'}
+                    ],
+                    'original_url': url,
+                    'is_fallback': True
+                })
+            except Exception as fb_err:
+                print(f"OEmbed fallback hatası: {fb_err}")
+
         return jsonify({
             'success': False,
-            'error': f'Video bilgisi alınamadı: {error_msg}'
+            'error': 'Video bilgisi alınamadı. Lütfen linki kontrol edin veya birkaç saniye sonra tekrar deneyin.'
         }), 400
 
 @app.route('/api/download', methods=['GET'])
@@ -202,6 +241,13 @@ def download_media():
         )
 
     except Exception as e:
+        print(f"Direct download failed: {e}. Checking fallback...")
+        yt_id = extract_youtube_id(url)
+        if yt_id:
+            # Safe direct fallback stream
+            target = f"https://ssyoutube.com/watch?v={yt_id}"
+            return redirect(target)
+            
         return f"İndirme sırasında hata oluştu: {str(e)}", 500
 
 if __name__ == '__main__':
