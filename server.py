@@ -2,12 +2,10 @@ import os
 import re
 import tempfile
 import uuid
-import urllib.request
-import json
 import yt_dlp
 import imageio_ffmpeg
 import shutil
-from flask import Flask, request, jsonify, send_file, send_from_directory, redirect
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder='.')
@@ -28,32 +26,36 @@ if not os.path.exists(STANDARD_FFMPEG):
 
 print(f"FFmpeg dizini: {FFMPEG_DIR}")
 
-# Shared YouTube extractor args to bypass bot detection on cloud datacenters
-YOUTUBE_EXTRACTOR_ARGS = {
-    'youtube': {
-        'player_client': ['android', 'ios', 'tv', 'web_creator'],
-        'player_skip': ['webpage', 'configs']
+def get_cookies_file():
+    cookies_content = os.environ.get('YOUTUBE_COOKIES', '').strip()
+    if cookies_content:
+        c_path = os.path.join(DOWNLOAD_DIR, 'render_youtube_cookies.txt')
+        try:
+            with open(c_path, 'w', encoding='utf-8') as f:
+                f.write(cookies_content)
+            return c_path
+        except Exception as e:
+            print(f"Cookies yazma hatası: {e}")
+    if os.path.exists('cookies.txt'):
+        return 'cookies.txt'
+    return None
+
+def get_base_ydl_opts():
+    opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'ffmpeg_location': FFMPEG_DIR,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'tv', 'web_creator'],
+                'player_skip': ['webpage', 'configs']
+            }
+        }
     }
-}
-
-COOKIES_FILE = os.path.join(DOWNLOAD_DIR, 'cookies.txt')
-# Check if cookies provided in environment variable
-if 'YOUTUBE_COOKIES' in os.environ:
-    try:
-        with open(COOKIES_FILE, 'w', encoding='utf-8') as f:
-            f.write(os.environ['YOUTUBE_COOKIES'])
-        print("YouTube cookies ortam değişkeninden yüklendi.")
-    except Exception as e:
-        print(f"Cookies yazma hatası: {e}")
-elif os.path.exists('cookies.txt'):
-    COOKIES_FILE = 'cookies.txt'
-else:
-    COOKIES_FILE = None
-
-def extract_youtube_id(url):
-    regex = r'(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
-    match = re.search(regex, url)
-    return match.group(1) if match else None
+    cfile = get_cookies_file()
+    if cfile and os.path.exists(cfile):
+        opts['cookiefile'] = cfile
+    return opts
 
 @app.route('/')
 def serve_index():
@@ -72,16 +74,11 @@ def analyze_url():
     if not url:
         return jsonify({'success': False, 'error': 'Lütfen geçerli bir URL girin.'}), 400
 
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts.update({
         'extract_flat': False,
         'skip_download': True,
-        'ffmpeg_location': FFMPEG_DIR,
-        'extractor_args': YOUTUBE_EXTRACTOR_ARGS
-    }
-    if COOKIES_FILE:
-        ydl_opts['cookiefile'] = COOKIES_FILE
+    })
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -151,42 +148,10 @@ def analyze_url():
                 'original_url': url
             })
     except Exception as e:
-        print(f"yt-dlp analyze hatası: {e}. Fallback mekanizması başlatılıyor...")
-        
-        # OEmbed Fallback for YouTube when datacenter IP is blocked
-        yt_id = extract_youtube_id(url)
-        if yt_id:
-            try:
-                oembed_url = f"https://noembed.com/embed?url=https://www.youtube.com/watch?v={yt_id}"
-                req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    oembed_data = json.loads(response.read().decode('utf-8'))
-                    
-                title = oembed_data.get('title', 'YouTube Videosu')
-                uploader = oembed_data.get('author_name', 'YouTube')
-                thumbnail = f"https://i.ytimg.com/vi/{yt_id}/hqdefault.jpg"
-
-                return jsonify({
-                    'success': True,
-                    'type': 'social_video',
-                    'title': title,
-                    'thumbnail': thumbnail,
-                    'duration': 0,
-                    'uploader': uploader,
-                    'description': '',
-                    'qualities': [
-                        {'format_id': 'best_video', 'resolution': '🎬 En Yüksek Kalite Video (MP4)', 'height': 1080, 'ext': 'mp4', 'size': '', 'type': 'video'},
-                        {'format_id': 'audio_mp3', 'resolution': '🎵 Sadece Müzik / Ses (MP3)', 'height': 0, 'ext': 'mp3', 'size': '', 'type': 'audio'}
-                    ],
-                    'original_url': url,
-                    'is_fallback': True
-                })
-            except Exception as fb_err:
-                print(f"OEmbed fallback hatası: {fb_err}")
-
+        print(f"Analyze error: {e}")
         return jsonify({
             'success': False,
-            'error': 'Video bilgisi alınamadı. Lütfen linki kontrol edin veya birkaç saniye sonra tekrar deneyin.'
+            'error': f'Video bilgisi alınamadı: {str(e)}'
         }), 400
 
 @app.route('/api/download', methods=['GET'])
@@ -200,15 +165,10 @@ def download_media():
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(DOWNLOAD_DIR, f'media_{unique_id}.%(ext)s')
 
-    ydl_opts = {
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts.update({
         'outtmpl': output_template,
-        'quiet': True,
-        'no_warnings': True,
-        'ffmpeg_location': FFMPEG_DIR,
-        'extractor_args': YOUTUBE_EXTRACTOR_ARGS
-    }
-    if COOKIES_FILE:
-        ydl_opts['cookiefile'] = COOKIES_FILE
+    })
 
     # Audio only (MP3)
     if format_id == 'audio_mp3':
@@ -259,13 +219,7 @@ def download_media():
         )
 
     except Exception as e:
-        print(f"Direct download failed: {e}. Checking fallback...")
-        yt_id = extract_youtube_id(url)
-        if yt_id:
-            # Safe direct fallback stream
-            target = f"https://ssyoutube.com/watch?v={yt_id}"
-            return redirect(target)
-            
+        print(f"Download error: {e}")
         return f"İndirme sırasında hata oluştu: {str(e)}", 500
 
 if __name__ == '__main__':
