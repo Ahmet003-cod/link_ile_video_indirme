@@ -33,38 +33,17 @@ def extract_youtube_id(url):
     match = re.search(regex, url)
     return match.group(1) if match else None
 
-def get_cookies_file():
-    cookies_content = os.environ.get('YOUTUBE_COOKIES', '').strip()
-    if cookies_content:
-        c_path = os.path.join(DOWNLOAD_DIR, 'render_youtube_cookies.txt')
-        try:
-            if not cookies_content.startswith('# Netscape'):
-                cookies_content = '# Netscape HTTP Cookie File\n' + cookies_content
-            with open(c_path, 'w', encoding='utf-8') as f:
-                f.write(cookies_content)
-            return c_path
-        except Exception as e:
-            print(f"Cookies yazma hatası: {e}")
-    if os.path.exists('cookies.txt'):
-        return 'cookies.txt'
-    return None
-
 def get_base_ydl_opts():
     opts = {
         'quiet': True,
         'no_warnings': True,
         'ffmpeg_location': FFMPEG_DIR,
-        'js_runtimes': {'node': {}},
         'extractor_args': {
             'youtube': {
-                'player_client': ['web', 'android', 'ios'],
-                'player_skip': ['configs']
+                'player_client': ['android']
             }
         }
     }
-    cfile = get_cookies_file()
-    if cfile and os.path.exists(cfile):
-        opts['cookiefile'] = cfile
     return opts
 
 @app.route('/')
@@ -161,7 +140,7 @@ def download_media():
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
+            'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
             'merge_output_format': 'mp4'
         })
 
