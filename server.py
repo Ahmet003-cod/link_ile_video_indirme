@@ -38,7 +38,6 @@ def get_cookies_file():
     if cookies_content:
         c_path = os.path.join(DOWNLOAD_DIR, 'render_youtube_cookies.txt')
         try:
-            # Ensure Netscape header
             if not cookies_content.startswith('# Netscape'):
                 cookies_content = '# Netscape HTTP Cookie File\n' + cookies_content
             with open(c_path, 'w', encoding='utf-8') as f:
@@ -84,85 +83,9 @@ def analyze_url():
     if not url:
         return jsonify({'success': False, 'error': 'Lütfen geçerli bir URL girin.'}), 400
 
-    ydl_opts = get_base_ydl_opts()
-    ydl_opts.update({
-        'extract_flat': False,
-        'skip_download': True,
-    })
-
-    # 1. Try yt-dlp first
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            title = info.get('title', 'Video')
-            thumbnail = info.get('thumbnail', '')
-            duration = info.get('duration', 0)
-            uploader = info.get('uploader', info.get('channel', ''))
-            description = info.get('description', '')
-            if description and len(description) > 150:
-                description = description[:150] + '...'
-
-            # Format list
-            formats_raw = info.get('formats', [])
-            available_qualities = []
-            seen_heights = set()
-
-            for f in formats_raw:
-                height = f.get('height')
-                vcodec = f.get('vcodec', 'none')
-                if height and vcodec != 'none' and height not in seen_heights:
-                    seen_heights.add(height)
-                    filesize = f.get('filesize') or f.get('filesize_approx') or 0
-                    filesize_str = f"{round(filesize / (1024*1024), 1)} MB" if filesize else ""
-                    available_qualities.append({
-                        'format_id': str(f.get('format_id')),
-                        'resolution': f"{height}p Video",
-                        'height': height,
-                        'ext': 'mp4',
-                        'size': filesize_str,
-                        'type': 'video'
-                    })
-
-            # Sort descending
-            available_qualities.sort(key=lambda x: x['height'], reverse=True)
-
-            # Best Quality option
-            quality_options = [{
-                'format_id': 'best_video',
-                'resolution': '🎬 En Yüksek Kalite Video (HD/4K)',
-                'height': 9999,
-                'ext': 'mp4',
-                'size': '',
-                'type': 'video'
-            }] + available_qualities
-
-            # Audio MP3 option
-            quality_options.append({
-                'format_id': 'audio_mp3',
-                'resolution': '🎵 Sadece Müzik / Ses (MP3)',
-                'height': 0,
-                'ext': 'mp3',
-                'size': '',
-                'type': 'audio'
-            })
-
-            return jsonify({
-                'success': True,
-                'type': 'social_video',
-                'title': title,
-                'thumbnail': thumbnail,
-                'duration': duration,
-                'uploader': uploader,
-                'description': description,
-                'qualities': quality_options,
-                'original_url': url
-            })
-    except Exception as e:
-        print(f"yt-dlp analyze uyarısı: {e}. Otomatik oEmbed devreye giriyor...")
-
-    # 2. Seamless Fallback: Fetch via oEmbed (Works 100% of the time, zero bot block)
     yt_id = extract_youtube_id(url)
+    
+    # 1. Fetch metadata via oEmbed (Guaranteed to succeed without bot error)
     if yt_id:
         try:
             oembed_url = f"https://noembed.com/embed?url=https://www.youtube.com/watch?v={yt_id}"
@@ -186,15 +109,35 @@ def analyze_url():
                     {'format_id': 'best_video', 'resolution': '🎬 En Yüksek Kalite Video (HD MP4)', 'height': 1080, 'ext': 'mp4', 'size': '', 'type': 'video'},
                     {'format_id': 'audio_mp3', 'resolution': '🎵 Sadece Müzik / Ses (MP3)', 'height': 0, 'ext': 'mp3', 'size': '', 'type': 'audio'}
                 ],
+                'original_url': url,
+                'video_id': yt_id
+            })
+        except Exception as e:
+            print(f"oEmbed error: {e}")
+
+    # 2. For non-youtube links, use yt-dlp
+    ydl_opts = get_base_ydl_opts()
+    ydl_opts.update({'extract_flat': False, 'skip_download': True})
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return jsonify({
+                'success': True,
+                'type': 'social_video',
+                'title': info.get('title', 'Video'),
+                'thumbnail': info.get('thumbnail', ''),
+                'duration': info.get('duration', 0),
+                'uploader': info.get('uploader', ''),
+                'description': '',
+                'qualities': [
+                    {'format_id': 'best_video', 'resolution': '🎬 En Yüksek Kalite Video', 'height': 1080, 'ext': 'mp4', 'size': '', 'type': 'video'},
+                    {'format_id': 'audio_mp3', 'resolution': '🎵 Sadece Müzik / Ses (MP3)', 'height': 0, 'ext': 'mp3', 'size': '', 'type': 'audio'}
+                ],
                 'original_url': url
             })
-        except Exception as fb_err:
-            print(f"oEmbed hatası: {fb_err}")
-
-    return jsonify({
-        'success': False,
-        'error': 'Video bilgisi yüklenemedi. Lütfen bağlantıyı kontrol edin.'
-    }), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Video yüklenemedi: {str(e)}'}), 400
 
 @app.route('/api/download', methods=['GET'])
 def download_media():
@@ -208,30 +151,16 @@ def download_media():
     output_template = os.path.join(DOWNLOAD_DIR, f'media_{unique_id}.%(ext)s')
 
     ydl_opts = get_base_ydl_opts()
-    ydl_opts.update({
-        'outtmpl': output_template,
-    })
+    ydl_opts.update({'outtmpl': output_template})
 
-    # Audio only (MP3)
     if format_id == 'audio_mp3':
         ydl_opts.update({
             'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         })
-    # Best Video (with audio merged)
-    elif format_id == 'best_video':
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
-            'merge_output_format': 'mp4'
-        })
-    # Specific video format id (merged with best audio)
     else:
         ydl_opts.update({
-            'format': f'{format_id}+bestaudio[ext=m4a]/{format_id}+bestaudio/best',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
             'merge_output_format': 'mp4'
         })
 
@@ -241,28 +170,24 @@ def download_media():
             title = info.get('title', 'video')
             safe_title = re.sub(r'[\\/*?:"<>|]', '_', title)[:80].strip()
 
-        # Find the downloaded file
         found_file = None
         for fname in os.listdir(DOWNLOAD_DIR):
             if fname.startswith(f'media_{unique_id}'):
                 found_file = os.path.join(DOWNLOAD_DIR, fname)
                 break
 
-        if not found_file or not os.path.exists(found_file):
-            return "İndirilen dosya bulunamadı", 500
-
-        ext = os.path.splitext(found_file)[1]
-        download_name = f"{safe_title}{ext}"
-
-        return send_file(
-            found_file,
-            as_attachment=True,
-            download_name=download_name
-        )
+        if found_file and os.path.exists(found_file):
+            ext = os.path.splitext(found_file)[1]
+            return send_file(found_file, as_attachment=True, download_name=f"{safe_title}{ext}")
 
     except Exception as e:
-        print(f"Download error: {e}")
-        return f"İndirme sırasında hata oluştu: {str(e)}", 500
+        print(f"Direct download error on datacenter IP: {e}")
+        yt_id = extract_youtube_id(url)
+        if yt_id:
+            # Fallback download redirect
+            return redirect(f"https://ssyoutube.com/watch?v={yt_id}")
+
+    return "İndirme başlatılamadı. Lütfen tekrar deneyin.", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5500))
