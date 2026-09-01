@@ -26,6 +26,14 @@ if not os.path.exists(STANDARD_FFMPEG):
 
 print(f"FFmpeg dizini: {FFMPEG_DIR}")
 
+# Shared YouTube extractor args to bypass bot detection on cloud datacenters
+YOUTUBE_EXTRACTOR_ARGS = {
+    'youtube': {
+        'player_client': ['ios', 'android', 'tv', 'web_creator'],
+        'player_skip': ['webpage', 'configs']
+    }
+}
+
 @app.route('/')
 def serve_index():
     return send_from_directory('.', 'index.html')
@@ -48,7 +56,8 @@ def analyze_url():
         'no_warnings': True,
         'extract_flat': False,
         'skip_download': True,
-        'ffmpeg_location': FFMPEG_DIR
+        'ffmpeg_location': FFMPEG_DIR,
+        'extractor_args': YOUTUBE_EXTRACTOR_ARGS
     }
 
     try:
@@ -140,7 +149,8 @@ def download_media():
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
-        'ffmpeg_location': FFMPEG_DIR
+        'ffmpeg_location': FFMPEG_DIR,
+        'extractor_args': YOUTUBE_EXTRACTOR_ARGS
     }
 
     # Audio only (MP3)
@@ -156,7 +166,7 @@ def download_media():
     # Best Video (with audio merged)
     elif format_id == 'best_video':
         ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
             'merge_output_format': 'mp4'
         })
     # Specific video format id (merged with best audio)
