@@ -36,6 +36,20 @@ YOUTUBE_EXTRACTOR_ARGS = {
     }
 }
 
+COOKIES_FILE = os.path.join(DOWNLOAD_DIR, 'cookies.txt')
+# Check if cookies provided in environment variable
+if 'YOUTUBE_COOKIES' in os.environ:
+    try:
+        with open(COOKIES_FILE, 'w', encoding='utf-8') as f:
+            f.write(os.environ['YOUTUBE_COOKIES'])
+        print("YouTube cookies ortam değişkeninden yüklendi.")
+    except Exception as e:
+        print(f"Cookies yazma hatası: {e}")
+elif os.path.exists('cookies.txt'):
+    COOKIES_FILE = 'cookies.txt'
+else:
+    COOKIES_FILE = None
+
 def extract_youtube_id(url):
     regex = r'(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
     match = re.search(regex, url)
@@ -66,6 +80,8 @@ def analyze_url():
         'ffmpeg_location': FFMPEG_DIR,
         'extractor_args': YOUTUBE_EXTRACTOR_ARGS
     }
+    if COOKIES_FILE:
+        ydl_opts['cookiefile'] = COOKIES_FILE
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -191,6 +207,8 @@ def download_media():
         'ffmpeg_location': FFMPEG_DIR,
         'extractor_args': YOUTUBE_EXTRACTOR_ARGS
     }
+    if COOKIES_FILE:
+        ydl_opts['cookiefile'] = COOKIES_FILE
 
     # Audio only (MP3)
     if format_id == 'audio_mp3':
