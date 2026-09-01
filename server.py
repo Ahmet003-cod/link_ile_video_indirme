@@ -7,7 +7,7 @@ import json
 import yt_dlp
 import imageio_ffmpeg
 import shutil
-from flask import Flask, request, jsonify, send_file, send_from_directory, redirect
+from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 
 app = Flask(__name__, static_folder='.')
@@ -54,10 +54,11 @@ def get_base_ydl_opts():
         'quiet': True,
         'no_warnings': True,
         'ffmpeg_location': FFMPEG_DIR,
+        'js_runtimes': {'node': {}},
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'tv', 'web_creator'],
-                'player_skip': ['webpage', 'configs']
+                'player_client': ['web', 'android', 'ios'],
+                'player_skip': ['configs']
             }
         }
     }
@@ -85,7 +86,7 @@ def analyze_url():
 
     yt_id = extract_youtube_id(url)
     
-    # 1. Fetch metadata via oEmbed (Guaranteed to succeed without bot error)
+    # 1. Fetch metadata via oEmbed
     if yt_id:
         try:
             oembed_url = f"https://noembed.com/embed?url=https://www.youtube.com/watch?v={yt_id}"
@@ -178,16 +179,17 @@ def download_media():
 
         if found_file and os.path.exists(found_file):
             ext = os.path.splitext(found_file)[1]
-            return send_file(found_file, as_attachment=True, download_name=f"{safe_title}{ext}")
+            return send_file(
+                found_file, 
+                as_attachment=True, 
+                download_name=f"{safe_title}{ext}"
+            )
+        else:
+            return "İndirilen dosya bulunamadı.", 500
 
     except Exception as e:
-        print(f"Direct download error on datacenter IP: {e}")
-        yt_id = extract_youtube_id(url)
-        if yt_id:
-            # Fallback download redirect
-            return redirect(f"https://ssyoutube.com/watch?v={yt_id}")
-
-    return "İndirme başlatılamadı. Lütfen tekrar deneyin.", 500
+        print(f"Direct download error: {e}")
+        return f"İndirme sırasında hata oluştu: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5500))
