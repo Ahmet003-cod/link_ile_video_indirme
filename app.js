@@ -32,9 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // State
   let currentMedia = {
-    mode: 'direct', // 'direct', 'social_local', 'social_web'
+    mode: 'direct', // 'direct' or 'backend'
     url: '',
-    videoId: '',
     type: '',
     extension: '',
     filename: '',
@@ -93,20 +92,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // Alert close
   alertClose.addEventListener('click', hideAlert);
 
-  // Download button click
+  // Download button click (100% Direct & Private)
   downloadBtn.addEventListener('click', async () => {
     if (!currentMedia.url) return;
 
-    if (currentMedia.mode === 'social_local') {
-      // Local Python backend download
+    if (currentMedia.mode === 'backend') {
       const selectedFormat = qualitySelect.value;
       const downloadUrl = `/api/download?url=${encodeURIComponent(currentMedia.url)}&format=${encodeURIComponent(selectedFormat)}`;
-      showAlert('İndirme Başlatılıyor', 'Video ve ses birleştiriliyor, indirme birazdan başlayacak. Lütfen bekleyin...', 'info');
+      
+      showAlert('İndirme Başlatılıyor', 'Sunucu videoyu işliyor ve cihazınıza indiriyor. Lütfen bekleyin...', 'info');
+      
+      const originalBtnText = downloadBtnText.textContent;
+      downloadBtn.disabled = true;
+      downloadBtnText.textContent = 'İndiriliyor...';
+
+      // Trigger direct browser download
       window.location.href = downloadUrl;
-    } else if (currentMedia.mode === 'social_web') {
-      // Netlify / Mobile Direct Dispatcher (100% Unblocked & Active Gateways)
-      const selectedVal = qualitySelect.value;
-      handleVerifiedWebDownload(currentMedia.url, currentMedia.videoId, selectedVal);
+
+      setTimeout(() => {
+        downloadBtn.disabled = false;
+        downloadBtnText.textContent = originalBtnText;
+      }, 4000);
     } else {
       // Direct media blob download
       await downloadDirectMedia(currentMedia.url, getFullFilename());
@@ -144,25 +150,16 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    showLoader('Medya taranıyor ve analiz ediliyor...');
+    showLoader('Medya taranıyor ve sunucuda analiz ediliyor...');
 
-    // 1. YouTube & Shorts check
-    const ytId = extractYouTubeId(url);
-    if (ytId) {
-      const handled = await handleYouTubeFlow(url, ytId);
-      if (handled) return;
+    // 1. First check if it's YouTube / Social / Platform link -> Send to Backend
+    const isPlatform = isSocialOrComplex(url);
+    if (isPlatform) {
+      const backendHandled = await analyzeWithBackend(url);
+      if (backendHandled) return;
     }
 
-    // 2. Other Social Platforms
-    if (isSocialPlatform(url)) {
-      const backendSuccess = await tryLocalBackend(url);
-      if (backendSuccess) return;
-      
-      renderGenericSocial(url);
-      return;
-    }
-
-    // 3. Direct Extension checks
+    // 2. Direct Extension checks (JPG, PNG, GIF, WebP, MP4, etc.)
     const parsedExt = extractExtension(url);
     if (IMAGE_EXTS.includes(parsedExt)) {
       try {
@@ -176,11 +173,11 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (e) {}
     }
 
-    // 4. Try backend for any unknown link
-    const backendSuccess = await tryLocalBackend(url);
+    // 3. Try Backend Analyzer for any unknown or streaming URL
+    const backendSuccess = await analyzeWithBackend(url);
     if (backendSuccess) return;
 
-    // 5. Fallback: try client-side image / video
+    // 4. Fallback: try client-side image / video
     const imageSuccess = await attemptImage(url);
     if (imageSuccess) {
       renderDirectImage(url, imageSuccess.width, imageSuccess.height, parsedExt || 'jpg');
@@ -194,75 +191,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     hideLoader();
-    showAlert('Medya Yüklenemedi', 'Bağlantı doğrudan bir medya dosyasına veya desteklenen bir video platformuna ait değil.', 'danger');
+    showAlert('Medya Yüklenemedi', 'Bağlantı geçerli bir video veya görsel olarak işlenemedi. Lütfen bağlantıyı kontrol edin.', 'danger');
   }
 
-  // Extract YouTube ID
-  function extractYouTubeId(url) {
-    try {
-      const regex = /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-      const match = url.match(regex);
-      return match ? match[1] : null;
-    } catch (e) {
-      return null;
-    }
+  function isSocialOrComplex(url) {
+    const keywords = ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'twitter.com', 'x.com', 'facebook.com', 'vimeo.com', 'dailymotion.com', 'reddit.com', 'shorts'];
+    return keywords.some(k => url.toLowerCase().includes(k));
   }
 
-  function isSocialPlatform(url) {
-    const socialDomains = ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'twitter.com', 'x.com', 'facebook.com', 'vimeo.com', 'dailymotion.com', 'reddit.com'];
-    return socialDomains.some(domain => url.toLowerCase().includes(domain));
-  }
-
-  // Handle YouTube Flow
-  async function handleYouTubeFlow(url, videoId) {
-    const backendSuccess = await tryLocalBackend(url);
-    if (backendSuccess) return true;
-
-    try {
-      const standardUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      const oembedUrl = `https://noembed.com/embed?url=${encodeURIComponent(standardUrl)}`;
-      
-      const response = await fetch(oembedUrl);
-      const data = await response.json();
-
-      const title = (data && data.title) ? data.title : 'YouTube Videosu';
-      const uploader = (data && data.author_name) ? data.author_name : 'YouTube';
-      const thumbnail = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-
-      renderSocialMediaWeb({
-        original_url: url,
-        videoId: videoId,
-        title: title,
-        uploader: uploader,
-        thumbnail: thumbnail,
-        qualities: [
-          { id: 'ss_direct', name: '⚡ 1. Sunucu: SS Hızlı İndirici (Önerilen)' },
-          { id: 'y2_mp4', name: '🎬 2. Sunucu: Y2 HD Video (MP4)' },
-          { id: 'y2_mp3', name: '🎵 3. Sunucu: Sadece Müzik / Ses (MP3)' },
-          { id: 'yt5s', name: '🚀 4. Sunucu: YT5s Alternatif Sunucu' }
-        ]
-      });
-
-      return true;
-    } catch (err) {
-      renderSocialMediaWeb({
-        original_url: url,
-        videoId: videoId,
-        title: 'YouTube Videosu',
-        uploader: 'YouTube',
-        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        qualities: [
-          { id: 'ss_direct', name: '⚡ 1. Sunucu: SS Hızlı İndirici (Önerilen)' },
-          { id: 'y2_mp4', name: '🎬 2. Sunucu: Y2 HD Video (MP4)' },
-          { id: 'y2_mp3', name: '🎵 3. Sunucu: Sadece Müzik / Ses (MP3)' }
-        ]
-      });
-      return true;
-    }
-  }
-
-  // Try local python backend
-  async function tryLocalBackend(url) {
+  // Analyze URL with Private Python Backend
+  async function analyzeWithBackend(url) {
     try {
       const response = await fetch('/api/analyze', {
         method: 'POST',
@@ -270,19 +208,23 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({ url })
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.success) {
-          renderSocialMediaLocal(data);
-          return true;
-        }
+      const data = await response.json();
+      if (data && data.success) {
+        renderBackendMedia(data);
+        return true;
+      } else if (data && data.error) {
+        hideLoader();
+        showAlert('Hata', data.error, 'danger');
+        return true;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Backend analyze error:', e);
+    }
     return false;
   }
 
-  // Render Social Media (Local Mode)
-  function renderSocialMediaLocal(data) {
+  // Render Media loaded from Backend
+  function renderBackendMedia(data) {
     hideLoader();
     mediaContainer.innerHTML = '';
 
@@ -294,7 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     currentMedia = {
-      mode: 'social_local',
+      mode: 'backend',
       url: data.original_url,
       type: 'video',
       filename: sanitizeFilename(data.title || 'video'),
@@ -311,6 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
     mediaTitleText.textContent = data.title || 'Video';
     mediaUploaderText.textContent = data.uploader ? `Kanal / Yükleyen: ${data.uploader}` : '';
 
+    // Quality dropdown options
     qualitySelect.innerHTML = '';
     data.qualities.forEach(q => {
       const option = document.createElement('option');
@@ -322,101 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
     qualityWrapper.style.display = 'flex';
     filenameWrapper.style.display = 'none';
     directOpenBtn.href = data.original_url;
-    downloadBtnText.textContent = 'Videoyu İndir';
-
-    showPreview();
-  }
-
-  // Render Social Media (Netlify / Mobile Mode)
-  function renderSocialMediaWeb(data) {
-    hideLoader();
-    mediaContainer.innerHTML = '';
-
-    if (data.thumbnail) {
-      const img = document.createElement('img');
-      img.src = data.thumbnail;
-      img.alt = data.title;
-      mediaContainer.appendChild(img);
-    }
-
-    currentMedia = {
-      mode: 'social_web',
-      url: data.original_url,
-      videoId: data.videoId,
-      type: 'video',
-      filename: sanitizeFilename(data.title || 'video'),
-      qualities: data.qualities || []
-    };
-
-    mediaTypeBadge.className = 'media-badge';
-    mediaTypeBadge.innerHTML = '<i class="fa-brands fa-youtube" style="color: #ef4444;"></i> <span>YouTube</span>';
-    mediaDetailsText.textContent = 'Canlı İndirici';
-
-    mediaInfoBox.style.display = 'block';
-    mediaTitleText.textContent = data.title || 'Video';
-    mediaUploaderText.textContent = data.uploader ? `Kanal: ${data.uploader}` : '';
-
-    qualitySelect.innerHTML = '';
-    data.qualities.forEach(q => {
-      const option = document.createElement('option');
-      option.value = q.id;
-      option.textContent = q.name;
-      qualitySelect.appendChild(option);
-    });
-
-    qualityWrapper.style.display = 'flex';
-    filenameWrapper.style.display = 'none';
-    directOpenBtn.href = data.original_url;
-    downloadBtnText.textContent = 'İndirmeyi Başlat';
-
-    showPreview();
-  }
-
-  // Verified & Unblocked Web Download Handler
-  function handleVerifiedWebDownload(url, videoId, format) {
-    showAlert('İndirme Başlatılıyor', 'Videonuz işleniyor, lütfen bekleyin...', 'info');
-
-    const cleanVideoUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
-    let targetUrl = '';
-
-    if (format === 'y2_mp3') {
-      targetUrl = `https://y2mate.nu/tr/youtube-to-mp3?url=${encodeURIComponent(cleanVideoUrl)}`;
-    } else if (format === 'y2_mp4') {
-      targetUrl = `https://y2mate.nu/tr/youtube-to-mp4?url=${encodeURIComponent(cleanVideoUrl)}`;
-    } else if (format === 'yt5s') {
-      targetUrl = `https://yt5s.biz/en/youtube-to-mp4?url=${encodeURIComponent(cleanVideoUrl)}`;
-    } else {
-      // Default: ssyoutube (SaveFrom) -> 100% unblocked & ultra fast in Turkey
-      targetUrl = videoId ? `https://ssyoutube.com/watch?v=${videoId}` : `https://ssyoutube.com/en176/?url=${encodeURIComponent(cleanVideoUrl)}`;
-    }
-
-    const win = window.open(targetUrl, '_blank');
-    if (!win) {
-      window.location.href = targetUrl;
-    }
-  }
-
-  function renderGenericSocial(url) {
-    hideLoader();
-    mediaContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #94a3b8;"><i class="fa-solid fa-cloud-arrow-down" style="font-size: 3rem; color: #3b82f6; margin-bottom: 12px;"></i><p>Sosyal Medya Bağlantısı Tespit Edildi</p></div>';
-
-    currentMedia = {
-      mode: 'social_web',
-      url: url,
-      type: 'video',
-      filename: 'sosyal_medya_video',
-      qualities: []
-    };
-
-    mediaTypeBadge.className = 'media-badge';
-    mediaTypeBadge.innerHTML = '<i class="fa-solid fa-film"></i> <span>Sosyal Medya</span>';
-    mediaDetailsText.textContent = 'Web İndirme';
-
-    mediaInfoBox.style.display = 'none';
-    qualityWrapper.style.display = 'none';
-    filenameWrapper.style.display = 'none';
-    directOpenBtn.href = url;
-    downloadBtnText.textContent = 'İndiriciyi Aç';
+    downloadBtnText.textContent = 'Cihaza İndir';
 
     showPreview();
   }
