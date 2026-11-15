@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import tempfile
 import uuid
 import urllib.request
@@ -16,17 +17,34 @@ CORS(app)
 DOWNLOAD_DIR = os.path.join(tempfile.gettempdir(), 'link_video_downloads')
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Locate and ensure standard ffmpeg.exe exists
+# Locate and ensure standard ffmpeg binary exists across Windows and Linux
 FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 FFMPEG_DIR = os.path.dirname(FFMPEG_EXE)
-STANDARD_FFMPEG = os.path.join(FFMPEG_DIR, 'ffmpeg.exe')
+ffmpeg_binary_name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+STANDARD_FFMPEG = os.path.join(FFMPEG_DIR, ffmpeg_binary_name)
 if not os.path.exists(STANDARD_FFMPEG):
     try:
         shutil.copyfile(FFMPEG_EXE, STANDARD_FFMPEG)
+        if os.name != 'nt':
+            os.chmod(STANDARD_FFMPEG, 0o755)
     except Exception as e:
         print(f"Copy ffmpeg error: {e}")
 
-print(f"FFmpeg dizini: {FFMPEG_DIR}")
+print(f"FFmpeg yolu: {FFMPEG_EXE}")
+
+def cleanup_old_downloads(max_age_seconds=600):
+    """Delete temporary downloaded files older than max_age_seconds."""
+    now = time.time()
+    try:
+        for fname in os.listdir(DOWNLOAD_DIR):
+            fpath = os.path.join(DOWNLOAD_DIR, fname)
+            if os.path.isfile(fpath) and (now - os.path.getmtime(fpath)) > max_age_seconds:
+                try:
+                    os.remove(fpath)
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 def extract_youtube_id(url):
     regex = r'(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
@@ -37,7 +55,7 @@ def get_base_ydl_opts():
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'ffmpeg_location': FFMPEG_DIR,
+        'ffmpeg_location': FFMPEG_EXE,
         'extractor_args': {
             'youtube': {
                 'player_client': ['android']
@@ -126,6 +144,8 @@ def download_media():
 
     if not url:
         return "URL parametresi eksik", 400
+
+    cleanup_old_downloads()
 
     unique_id = str(uuid.uuid4())[:8]
     output_template = os.path.join(DOWNLOAD_DIR, f'media_{unique_id}.%(ext)s')
