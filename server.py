@@ -40,7 +40,7 @@ YTDLP_CLIENT_SETS = [
     ['visionos', 'tv_downgraded', 'web_embedded', 'tv'],
     ['ios', 'mweb', 'web_safari', 'web'],
 ]
-PYTUBEFIX_CLIENTS = ['VISION_OS', 'MWEB', 'WEB_EMBED', 'IOS', 'TV', 'ANDROID_VR']
+PYTUBEFIX_CLIENTS = ['VISION_OS', 'MWEB']
 PIPED_INSTANCES = [
     'https://pipedapi.kavin.rocks',
     'https://pipedapi.adminforge.de',
@@ -133,6 +133,9 @@ def get_base_ydl_opts(player_clients=None, use_cookies=False):
         'source_address': '0.0.0.0',
         'js_runtimes': js_runtimes,
         'geo_bypass': True,
+        'socket_timeout': 10,
+        'retries': 1,
+        'extractor_retries': 1,
     }
 
     if player_clients:
@@ -187,7 +190,7 @@ def _mux_video_audio_mp4(video_path, audio_path, output_path):
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90)
 
 
-def _download_stream_to_file(stream_url, dest_path, timeout=60):
+def _download_stream_to_file(stream_url, dest_path, timeout=25):
     """Stream a remote media URL directly to disk and reject HTML/empty responses."""
     req = urllib.request.Request(stream_url, headers={'User-Agent': HTTP_USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -429,41 +432,121 @@ def _get_invidious_instances():
     return seen
 
 
+def _normalize_invidious_url(stream_url, base_url):
+    """Ensure an Invidious stream URL is proxied through base_url."""
+    if not stream_url:
+        return ''
+    if stream_url.startswith('/'):
+        stream_url = f"{base_url}{stream_url}"
+    elif 'googlevideo.com' in stream_url:
+        parsed_base = urllib.parse.urlparse(base_url)
+        parsed_stream = urllib.parse.urlparse(stream_url)
+        stream_url = urllib.parse.urlunparse((
+            parsed_base.scheme,
+            parsed_base.netloc,
+            parsed_stream.path,
+            parsed_stream.params,
+            parsed_stream.query,
+            parsed_stream.fragment,
+        ))
+    if 'local=' not in stream_url:
+        sep = '&' if '?' in stream_url else '?'
+        stream_url = f"{stream_url}{sep}local=true"
+    return stream_url
+
+
+def _pick_invidious_audio_url(adaptive_formats, base_url, yt_id):
+    """Select the best proxied audio stream URL from Invidious adaptiveFormats."""
+    by_itag = {str(f.get('itag')): f for f in adaptive_formats if f.get('url')}
+    for itag in ('140', '139', '251', '250', '249'):
+        if itag in by_itag:
+            return _normalize_invidious_url(by_itag[itag]['url'], base_url)
+    for f in adaptive_formats:
+        if f.get('url') and 'audio/' in (f.get('type') or '').lower():
+            return _normalize_invidious_url(f['url'], base_url)
+    return f"{base_url}/latest_version?id={yt_id}&itag=140&local=true"
+
+
+def _pick_invidious_video_url(adaptive_formats, base_url):
+    """Select the best H.264 MP4 video stream URL from Invidious adaptiveFormats."""
+    h264_by_itag = {
+        str(f.get('itag')): f
+        for f in adaptive_formats
+        if f.get('url')
+        and 'video/mp4' in (f.get('type') or '').lower()
+        and 'avc1' in (f.get('type') or '').lower()
+    }
+    for itag in ('136', '137', '135', '134', '133', '160'):
+        if itag in h264_by_itag:
+            return _normalize_invidious_url(h264_by_itag[itag]['url'], base_url)
+    return None
+
+
 def _download_via_invidious(yt_id, format_id, unique_id):
     """Try downloading a proxied stream through public Invidious instances."""
     last_error = None
     for base_url in _get_invidious_instances():
-        raw_path = None
+        raw_files = []
         try:
-            title = 'video'
+            meta = {}
             try:
                 meta = _fetch_json(f"{base_url}/api/v1/videos/{yt_id}?local=true", timeout=8)
-                title = meta.get('title', 'video')
             except Exception:
                 pass
-            safe_title = sanitize_title(title)
+            safe_title = sanitize_title(meta.get('title', 'video'))
+            adaptive_formats = meta.get('adaptiveFormats') or []
+            format_streams = meta.get('formatStreams') or []
 
             if format_id == 'audio_mp3':
-                stream_url = f"{base_url}/latest_version?id={yt_id}&itag=140&local=true"
-                raw_path = os.path.join(DOWNLOAD_DIR, f"raw_{unique_id}_inv.m4a")
-                _download_stream_to_file(stream_url, raw_path, timeout=60)
+                audio_url = _pick_invidious_audio_url(adaptive_formats, base_url, yt_id)
+                raw_a = os.path.join(DOWNLOAD_DIR, f"raw_{unique_id}_inv.m4a")
+                raw_files.append(raw_a)
+                _download_stream_to_file(audio_url, raw_a, timeout=25)
                 out_path = os.path.join(DOWNLOAD_DIR, f"media_{unique_id}.mp3")
-                _convert_to_mp3(raw_path, out_path)
+                _convert_to_mp3(raw_a, out_path)
                 return out_path, safe_title
 
-            stream_url = f"{base_url}/latest_version?id={yt_id}&itag=18&local=true"
+            # Video 1: Try adaptive HD H.264 video + audio muxing (works for Shorts & HD videos)
+            video_url = _pick_invidious_video_url(adaptive_formats, base_url)
+            if video_url:
+                try:
+                    audio_url = _pick_invidious_audio_url(adaptive_formats, base_url, yt_id)
+                    raw_v = os.path.join(DOWNLOAD_DIR, f"raw_{unique_id}_inv_v.mp4")
+                    raw_a = os.path.join(DOWNLOAD_DIR, f"raw_{unique_id}_inv_a.m4a")
+                    raw_files.extend([raw_v, raw_a])
+                    _download_stream_to_file(video_url, raw_v, timeout=30)
+                    _download_stream_to_file(audio_url, raw_a, timeout=25)
+                    out_path = os.path.join(DOWNLOAD_DIR, f"media_{unique_id}.mp4")
+                    _mux_video_audio_mp4(raw_v, raw_a, out_path)
+                    return out_path, safe_title
+                except Exception as mux_err:
+                    print(f"Invidious adaptive mux failed ({base_url}): {mux_err}")
+                    for rf in raw_files:
+                        _remove_file_silently(rf)
+                    raw_files.clear()
+
+            # Video 2: Fallback to progressive formatStreams or itag=18
+            prog_candidates = [
+                _normalize_invidious_url(fs.get('url'), base_url)
+                for fs in format_streams if fs.get('url')
+            ]
+            prog_candidates.append(f"{base_url}/latest_version?id={yt_id}&itag=18&local=true")
+
             out_path = os.path.join(DOWNLOAD_DIR, f"media_{unique_id}.mp4")
-            try:
-                _download_stream_to_file(stream_url, out_path, timeout=60)
-                return out_path, safe_title
-            except Exception:
-                _remove_file_silently(out_path)
-                raise
+            for prog_url in prog_candidates:
+                try:
+                    _download_stream_to_file(prog_url, out_path, timeout=25)
+                    return out_path, safe_title
+                except Exception:
+                    _remove_file_silently(out_path)
+
+            raise ValueError("Invidious video akışı alınamadı.")
         except Exception as e:
             last_error = e
             print(f"Invidious attempt failed ({base_url}): {e}")
         finally:
-            _remove_file_silently(raw_path)
+            for rf in raw_files:
+                _remove_file_silently(rf)
 
     raise last_error or RuntimeError("Invidious indirme başarısız.")
 
@@ -572,29 +655,32 @@ def download_media():
     yt_id = extract_youtube_id(url)
     errors = []
 
-    # Stage 1: yt-dlp (with YouTube client rotation)
-    try:
-        found_file, safe_title = _download_via_ytdlp(url, format_id, unique_id, bool(yt_id))
-        ext = os.path.splitext(found_file)[1]
-        return send_file(found_file, as_attachment=True, download_name=f"{safe_title}{ext}")
-    except Exception as e:
-        errors.append(f"yt-dlp: {e}")
-
-    # Stage 2 & 3: YouTube-specific fallbacks (pytubefix -> Piped/Invidious)
     if yt_id:
-        try:
-            found_file, safe_title = _download_via_pytubefix(url, format_id, unique_id)
-            ext = os.path.splitext(found_file)[1]
-            return send_file(found_file, as_attachment=True, download_name=f"{safe_title}{ext}")
-        except Exception as e:
-            errors.append(f"pytubefix: {e}")
+        is_cloud_without_cookies = bool(os.environ.get('RENDER')) and not get_cookies_file()
+        if is_cloud_without_cookies:
+            stages = [
+                ('proxy', lambda: _download_via_proxy_fallback(yt_id, format_id, unique_id)),
+                ('yt-dlp', lambda: _download_via_ytdlp(url, format_id, unique_id, True)),
+                ('pytubefix', lambda: _download_via_pytubefix(url, format_id, unique_id)),
+            ]
+        else:
+            stages = [
+                ('yt-dlp', lambda: _download_via_ytdlp(url, format_id, unique_id, True)),
+                ('pytubefix', lambda: _download_via_pytubefix(url, format_id, unique_id)),
+                ('proxy', lambda: _download_via_proxy_fallback(yt_id, format_id, unique_id)),
+            ]
+    else:
+        stages = [
+            ('yt-dlp', lambda: _download_via_ytdlp(url, format_id, unique_id, False)),
+        ]
 
+    for stage_name, stage_fn in stages:
         try:
-            found_file, safe_title = _download_via_proxy_fallback(yt_id, format_id, unique_id)
+            found_file, safe_title = stage_fn()
             ext = os.path.splitext(found_file)[1]
             return send_file(found_file, as_attachment=True, download_name=f"{safe_title}{ext}")
         except Exception as e:
-            errors.append(f"proxy: {e}")
+            errors.append(f"{stage_name}: {e}")
 
     error_summary = " | ".join(errors)
     print(f"All download stages failed: {error_summary}")
